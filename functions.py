@@ -132,12 +132,18 @@ def get_wallet_balance(wallet_address):
         block_id += 1
     return balance
 
-def check_signature_data(message, from_address, to_address, amount):
-    data = message.split('|||')
-    if data[1] == from_address:
-        if data[2] == to_address:
-            if data[3] == str(amount):
-                return True
+def check_signature_data(sig_message, timestamp, from_address, to_address, amount, message):
+    data = sig_message.split('|||')
+    if data[0] == timestamp:
+        if data[1] == from_address:
+            if data[2] == to_address:
+                if data[3] == str(amount):
+                    if data[4] == str(message):
+                        return True
+                    else:
+                        return False
+                else:
+                    return False
             else:
                 return False
         else:
@@ -158,7 +164,7 @@ def validate_signature(public_key,signature,message):
     except:
         return False
 
-def sign_ECDSA_msg(private_key, public_key, to, amount):
+def sign_ECDSA_msg(private_key, public_key, to, amount, message_send, timestamp):
     """Sign the message to be sent
     private_key: must be hex
 
@@ -167,7 +173,7 @@ def sign_ECDSA_msg(private_key, public_key, to, amount):
     message: str
     """
     #get timestamp, round it, make it string and encode it to bytes
-    message=str(round(time.time()))+ public_key + to + amount
+    message=str(timestamp)+'|||'+str(public_key)+'|||'+str(to)+'|||'+str(amount)+'|||'+str(message_send)
     bmessage = message.encode()
     sk = ecdsa.SigningKey.from_string(bytes.fromhex(private_key), curve=ecdsa.SECP256k1)
     signature = base64.b64encode(sk.sign(bmessage))
@@ -192,11 +198,11 @@ def validate_transactions(transactions):
                 flawed = True
             network_checked = True
         elif transaction['from'] == 'reward_center':
-            if validate_signature(transaction['from_address'], transaction['signature'], transaction['message']) == True:
+            if validate_signature(transaction['from_address'], transaction['signature'], transaction['sig_message']) == True:
                 valid_transactions.append(transaction)
                 print(f'Transaction from {transaction["from"]} for {transaction["amount"]} was successfull')
         elif transaction['from_address'] != 'network':
-            if validate_signature(transaction['from_address'], transaction['signature'], transaction['message']) == True:
+            if validate_signature(transaction['from_address'], transaction['signature'], transaction['sig_message']) == True:
                 wallet_balance = get_wallet_balance(transaction['from'])
                 if float(wallet_balance) >= float(transaction['amount']):
                     valid_transactions.append(transaction)
@@ -308,20 +314,170 @@ def check_stats():
 
 def add_balance(user_iden, reward):
     data = {}
+    data['datetime'] = str(time.time())
     data['from'] = "reward_center"
     data['from_address'] = database.get_config_data(REWARD_CENTER_NODE_PUBLIC_KEY=1)
-    data['to'] = user_iden
+    data['to_address'] = user_iden
     data['amount'] = reward
     signature, message = sign_ECDSA_msg(database.get_config_data(REWARD_CENTER_NODE_PRIVATE_KEY=1),
-                                        database.get_config_data(REWARD_CENTER_NODE_PUBLIC_KEY=1), user_iden, str(reward))
+                                        database.get_config_data(REWARD_CENTER_NODE_PUBLIC_KEY=1), user_iden, str(reward), 'Reward for mining', data['datetime'])
     data['signature'] = signature
-    data['message'] = message
+    data['sig_message'] = message
+    data['message'] = 'Reward for mining'
     database.add_pending_transaction(data)
     database.update_stats_coin(float(database.get_stat_new_coins())+float(reward))
 
 def get_random_float():
-    randoms = [1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
+    randoms = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
     return randoms[random.randint(0, len(randoms)-1)]
+
+def mine(a):
+    while True:
+        """Mining is the only way that new coins can be created.
+        In order to prevent too many coins to be created, the process
+        is slowed down by a proof of work algorithm.
+        """
+        # Get the last proof of work
+
+        last_block = database.get_last_block()
+        try:
+            last_proof = last_block.data['proof-of-work']
+        except Exception:
+            last_proof = 0
+
+        print('starting a new search round\n')
+        # Find the proof of work for the current block being mined
+        # Note: The program will hang here until a new proof of work is found
+        proof = proof_of_work(last_proof)
+        # If we didn't guess the proof, start mining again
+        # if proof[0] == False:
+        #     # Update blockchain and save it to file
+        #     BLOCKCHAIN = proof[1]
+        #     i = 0
+        #     for item in BLOCKCHAIN:
+        #         package = []
+        #         package.append('chunk')
+        #         package.append(item)
+        #         package.append(i)
+        #         a.send(package)
+        #         requests.get(MINER_NODE_URL + "/blocks?update=" + 'syncing'+str(i))
+        #         while(a.recv() != i):
+        #             wait = True
+        #
+        #         i += 1
+        #
+        #     sha = hasher.sha256()
+        #     sha.update( str(json.dumps(BLOCKCHAIN)).encode('utf-8') )
+        #     digest = str(sha.hexdigest())
+        #     package = []
+        #     package.append('digest')
+        #     package.append(digest)
+        #     a.send(package)
+        #     requests.get(MINER_NODE_URL + "/blocks?update=" + 'syncing_digest')
+        #     print('synced with an external chain\n')
+        #     continue
+        #else:
+        if proof != False:
+            # Once we find a valid proof of work, we know we can mine a block so
+            # we reward the miner by adding a transaction
+            #First we load all pending transactions sent to the node server
+            # data = None
+            # with eventlet.Timeout(5, False):
+            #     url     = MINER_NODE_URL + "/txion?update=" + MINER_ADDRESS
+            #     payload = {"source": "miner", "option":"pendingtxs", "address": MINER_ADDRESS}
+            #     headers = {"Content-Type": "application/json"}
+            #
+            #     data = requests.post(url, json=payload, headers=headers).text
+            #     eventlet.sleep(0)
+            #
+            # if data is not None:
+            #     NODE_PENDING_TRANSACTIONS = json.loads(data)
+            # else:
+            #     print('local request failed')
+            #     continue
+
+            NODE_PENDING_TRANSACTIONS = []
+            pending_transactions = database.get_pending_transaction()
+            while pending_transactions != 0:
+                NODE_PENDING_TRANSACTIONS.append(
+                    {
+                        'datetime': pending_transactions[7],
+                        'from': pending_transactions[0],
+                        'from_address': pending_transactions[1],
+                        'to_address': pending_transactions[2],
+                        'amount': pending_transactions[3],
+                        'signature': pending_transactions[4],
+                        'sig_message': pending_transactions[5],
+                        'message': pending_transactions[6]
+                    }
+                )
+                database.del_pending_transaction(pending_transactions[7])
+                pending_transactions = database.get_pending_transaction()
+
+            # #Then we add the mining reward
+            # NODE_PENDING_TRANSACTIONS.append(
+            # { 'from': 'network',
+            #   'to': MINER_ADDRESS,
+            #   'amount': 1 }
+            # )
+
+            NODE_PENDING_TRANSACTIONS = validate_transactions(list(NODE_PENDING_TRANSACTIONS))
+
+            # Now we can gather the data needed to create the new block
+            new_block_data = {
+            'proof-of-work': proof,
+            'transactions': NODE_PENDING_TRANSACTIONS
+            }
+            new_block_index = int(last_block[0]) + 1
+            new_block_timestamp = time.time()
+            last_block_hash = last_block[5]
+            # Empty transaction list
+            NODE_PENDING_TRANSACTIONS = []
+            # Now create the new block
+            mined_block = Block(new_block_index, new_block_timestamp, new_block_data, last_block_hash, proof)
+            #BLOCKCHAIN.append(mined_block)
+            block_to_add = {
+                'index': str(mined_block.index),
+                'timestamp': str(mined_block.timestamp),
+                'data': mined_block.data,
+                'hash': mined_block.hash,
+                'previous_hash': mined_block.previous_hash,
+                "prover": mined_block.prover
+            }
+            database.add_block(block_to_add)
+            check_stats()
+            #BLOCKCHAIN.append(block_to_add)
+            # Let the client know this node mined a block
+            print(json.dumps({
+              'index': new_block_index,
+              'timestamp': str(new_block_timestamp),
+              'data': new_block_data,
+              'hash': last_block_hash
+            }) + "\n")
+
+            # with eventlet.Timeout(5,False):
+            #     i = 0
+            #     for item in BLOCKCHAIN:
+            #         package = []
+            #         package.append('chunk')
+            #         package.append(item)
+            #         package.append(i)
+            #         a.send(package)
+            #         requests.get(MINER_NODE_URL + "/blocks?update=" + "internal_syncing")
+            #         while(a.recv() != i):
+            #             wait = True
+            #
+            #         i += 1
+            #
+            #     sha = hasher.sha256()
+            #     sha.update( str(json.dumps(BLOCKCHAIN)).encode('utf-8') )
+            #     digest = str(sha.hexdigest())
+            #     package = []
+            #     package.append('digest')
+            #     package.append(digest)
+            #     a.send(package)
+            #     requests.get(MINER_NODE_URL + "/blocks?update=" + "internal_syncing")
+            #     eventlet.sleep(0)
 
 def proof_of_work(last_proof):
   # Create a variable that we will use to find our next proof of work

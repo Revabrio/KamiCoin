@@ -8,7 +8,6 @@ import eventlet
 import database
 import functions
 import miner_config
-from block import Block
 from flask import Flask
 import hashlib as hasher
 from flask import request
@@ -18,152 +17,6 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 node = Flask(__name__)
-
-def mine(a):
-    while True:
-        """Mining is the only way that new coins can be created.
-        In order to prevent too many coins to be created, the process
-        is slowed down by a proof of work algorithm.
-        """
-        # Get the last proof of work
-
-        last_block = database.get_last_block()
-        try:
-            last_proof = last_block.data['proof-of-work']
-        except Exception:
-            last_proof = 0
-
-        print('starting a new search round\n')
-        # Find the proof of work for the current block being mined
-        # Note: The program will hang here until a new proof of work is found
-        proof = functions.proof_of_work(last_proof)
-        # If we didn't guess the proof, start mining again
-        # if proof[0] == False:
-        #     # Update blockchain and save it to file
-        #     BLOCKCHAIN = proof[1]
-        #     i = 0
-        #     for item in BLOCKCHAIN:
-        #         package = []
-        #         package.append('chunk')
-        #         package.append(item)
-        #         package.append(i)
-        #         a.send(package)
-        #         requests.get(MINER_NODE_URL + "/blocks?update=" + 'syncing'+str(i))
-        #         while(a.recv() != i):
-        #             wait = True
-        #
-        #         i += 1
-        #
-        #     sha = hasher.sha256()
-        #     sha.update( str(json.dumps(BLOCKCHAIN)).encode('utf-8') )
-        #     digest = str(sha.hexdigest())
-        #     package = []
-        #     package.append('digest')
-        #     package.append(digest)
-        #     a.send(package)
-        #     requests.get(MINER_NODE_URL + "/blocks?update=" + 'syncing_digest')
-        #     print('synced with an external chain\n')
-        #     continue
-        #else:
-        if proof != False:
-            # Once we find a valid proof of work, we know we can mine a block so
-            # we reward the miner by adding a transaction
-            #First we load all pending transactions sent to the node server
-            # data = None
-            # with eventlet.Timeout(5, False):
-            #     url     = MINER_NODE_URL + "/txion?update=" + MINER_ADDRESS
-            #     payload = {"source": "miner", "option":"pendingtxs", "address": MINER_ADDRESS}
-            #     headers = {"Content-Type": "application/json"}
-            #
-            #     data = requests.post(url, json=payload, headers=headers).text
-            #     eventlet.sleep(0)
-            #
-            # if data is not None:
-            #     NODE_PENDING_TRANSACTIONS = json.loads(data)
-            # else:
-            #     print('local request failed')
-            #     continue
-
-            NODE_PENDING_TRANSACTIONS = []
-            pending_transactions = database.get_pending_transaction()
-            while pending_transactions != 0:
-                NODE_PENDING_TRANSACTIONS.append(
-                    {
-                        'from': pending_transactions[0],
-                        'from_address': pending_transactions[1],
-                        'to_address': pending_transactions[2],
-                        'amount': pending_transactions[3],
-                        'signature': pending_transactions[4],
-                        'message': pending_transactions[5]
-                    }
-                )
-                database.del_pending_transaction(pending_transactions[6])
-                pending_transactions = database.get_pending_transaction()
-
-            # #Then we add the mining reward
-            # NODE_PENDING_TRANSACTIONS.append(
-            # { 'from': 'network',
-            #   'to': MINER_ADDRESS,
-            #   'amount': 1 }
-            # )
-
-            NODE_PENDING_TRANSACTIONS = functions.validate_transactions(list(NODE_PENDING_TRANSACTIONS))
-
-            # Now we can gather the data needed to create the new block
-            new_block_data = {
-            'proof-of-work': proof,
-            'transactions': NODE_PENDING_TRANSACTIONS
-            }
-            new_block_index = int(last_block[0]) + 1
-            new_block_timestamp = time.time()
-            last_block_hash = last_block[5]
-            # Empty transaction list
-            NODE_PENDING_TRANSACTIONS = []
-            # Now create the new block
-            mined_block = Block(new_block_index, new_block_timestamp, new_block_data, last_block_hash, proof)
-            #BLOCKCHAIN.append(mined_block)
-            block_to_add = {
-                'index': str(mined_block.index),
-                'timestamp': str(mined_block.timestamp),
-                'data': mined_block.data,
-                'hash': mined_block.hash,
-                'previous_hash': mined_block.previous_hash,
-                "prover": mined_block.prover
-            }
-            database.add_block(block_to_add)
-            functions.check_stats()
-            #BLOCKCHAIN.append(block_to_add)
-            # Let the client know this node mined a block
-            print(json.dumps({
-              'index': new_block_index,
-              'timestamp': str(new_block_timestamp),
-              'data': new_block_data,
-              'hash': last_block_hash
-            }) + "\n")
-
-            # with eventlet.Timeout(5,False):
-            #     i = 0
-            #     for item in BLOCKCHAIN:
-            #         package = []
-            #         package.append('chunk')
-            #         package.append(item)
-            #         package.append(i)
-            #         a.send(package)
-            #         requests.get(MINER_NODE_URL + "/blocks?update=" + "internal_syncing")
-            #         while(a.recv() != i):
-            #             wait = True
-            #
-            #         i += 1
-            #
-            #     sha = hasher.sha256()
-            #     sha.update( str(json.dumps(BLOCKCHAIN)).encode('utf-8') )
-            #     digest = str(sha.hexdigest())
-            #     package = []
-            #     package.append('digest')
-            #     package.append(digest)
-            #     a.send(package)
-            #     requests.get(MINER_NODE_URL + "/blocks?update=" + "internal_syncing")
-            #     eventlet.sleep(0)
 
 @node.route('/getWork', methods=['GET'])
 def getWork():
@@ -286,29 +139,30 @@ def get_num_blocks():
 
 @node.route('/block_get', methods=['GET'])
 def get_block():
-    if int(request.args.get("block")) >= 0:
-        if int(request.args.get("block")) >= int(database.get_last_block()[0]) + 1:
+    data = request.get_json()
+    if int(data['block']) >= 0:
+        if int(data['block']) >= int(database.get_last_block()[0]) + 1:
             return json.dumps({"error": "This block hasn't mined"})
         else:
-            block = database.get_block(block_id=int(request.args.get("block")))[1]
+            block = database.get_block(block_id=int(data['block']))[1]
             block = {
-                "index": str(block[0]),
-                "timestamp": str(block[1]),
-                "data": str(block[2]),
-                "hash": block[5],
-                "previous_hash": block[3],
-                "prover": block[4]
+                'index': str(block[0]),
+                'timestamp': str(block[1]),
+                'data': block[2],
+                'hash': block[5],
+                'previous_hash': block[3],
+                'prover': block[4]
             }
             return json.dumps(block)
-    elif int(request.args.get("block")) == -1:
+    elif int(data['block']) == -1:
         block = database.get_last_block()
         block = {
-            "index": str(block[0]),
-            "timestamp": str(block[1]),
-            "data": str(block[2]),
-            "hash": block[5],
-            "previous_hash": block[3],
-            "prover": block[4]
+            'index': str(block[0]),
+            'timestamp': str(block[1]),
+            'data': block[2],
+            'hash': block[5],
+            'previous_hash': block[3],
+            'prover': block[4]
         }
         return json.dumps(block)
     return json.dumps({"error": "Unknown parameters"})
@@ -324,27 +178,31 @@ def transaction():
         new_txion = request.get_json()
         if new_txion['source'] == "wallet" and new_txion['option'] == "newtx":
             # Then we add the transaction to our list
-            if functions.validate_signature(new_txion['from_address'],new_txion['signature'],new_txion['message']):
-                if functions.check_signature_data(new_txion['message'], new_txion['from_address'], new_txion['to_address'],
-                                        new_txion['amount']) == True:
-                    if float(new_txion['amount']) > 0.0000000001:
-                        new_txion['from'] = ''
-                        database.add_pending_transaction(new_txion)
-                        #NODE_PENDING_TRANSACTIONS.append(new_txion)
-                        # Because the transaction was successfully
-                        # submitted, we log it to our console
-                        print("New transaction")
-                        print("FROM: {0}".format(new_txion['from_address']))
-                        print("TO: {0}".format(new_txion['to_address']))
-                        print("AMOUNT: {0}\n".format(new_txion['amount']))
-                        # Then we let the client know it worked out
-                        return "Transaction submission successful\n"
+            if len(new_txion['sig_message'])<=128:
+                if functions.validate_signature(new_txion['from_address'],new_txion['signature'],new_txion['sig_message']):
+                    if functions.check_signature_data(new_txion['sig_message'], new_txion['datetime'], new_txion['from_address'], new_txion['to_address'],
+                                            new_txion['amount'], new_txion['message']) == True:
+                        new_txion['amount'] = functions.toFixed(float(new_txion['amount']), 10)
+                        if float(new_txion['amount']) > 0.0000000001:
+                            new_txion['from'] = ''
+                            database.add_pending_transaction(new_txion)
+                            #NODE_PENDING_TRANSACTIONS.append(new_txion)
+                            # Because the transaction was successfully
+                            # submitted, we log it to our console
+                            print("New transaction")
+                            print("FROM: {0}".format(new_txion['from_address']))
+                            print("TO: {0}".format(new_txion['to_address']))
+                            print("AMOUNT: {0}\n".format(new_txion['amount']))
+                            # Then we let the client know it worked out
+                            return "Transaction submission successful\n"
+                        else:
+                            return "Transaction submission failed. Summ < 0.0000000001\n"
                     else:
-                        return "Transaction submission failed. Summ < 0.0000000001\n"
+                        return "Transaction submission failed. Wrong signature\n"
                 else:
                     return "Transaction submission failed. Wrong signature\n"
             else:
-                return "Transaction submission failed. Wrong signature\n"
+                return "Transaction submission failed. Message too long\n"
 
         elif new_txion['source'] == "wallet" and new_txion['option'] == "balance":
             print(new_txion['wallet'])
@@ -376,12 +234,12 @@ def transaction():
             return 'Arguments not specified'
 
 def welcome_msg():
-    print("""       =========================================\n
-        SIMPLE COIN v1.0.0 - BLOCKCHAIN SYSTEM\n
-       =========================================\n\n
-        You can find more help at: https://github.com/Scotchmann/SimpleCoin\n
-        Make sure you are using the latest version or you may end in
-        a parallel chain.\n\n\n""")
+    print("""=========================================\n
+        KamiCoin v0.1.1 - BLOCKCHAIN SYSTEM\n
+        =========================================\n\n
+        You can find more help at: https://github.com/Revabrio/KamiCoin\n
+        You can find more help for wallet at: https://github.com/Revabrio/KamiCoin_Wallet\n
+        \n\n\n""")
     print('Miner has been started at '+miner_config.MINER_NODE_URL+'! Good luck!\n')
 
 if __name__ == '__main__':
@@ -399,7 +257,7 @@ if __name__ == '__main__':
         print('Blockchain is empty, another chains dont exist, creating new chain')
         database.add_block(functions.create_genesis_block())
 
-    p1 = Process(target=mine, args=(a,))
+    p1 = Process(target=functions.mine, args=(a,))
     p1.start()
 
     # #Start server to recieve transactions

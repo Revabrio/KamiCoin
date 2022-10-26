@@ -18,20 +18,20 @@ def add_block(block_data):
         return -1
 
 def add_pending_transaction(transaction_data):
-        conn = sqlite3.connect(database_file)
-    #try:
+    conn = sqlite3.connect(database_file)
+    try:
         cur = conn.cursor()
         cur.execute("INSERT INTO pending_transactions (from_type, from_transaction, to_transaction, amount_transaction, "
-                    "signature_transaction, message_transaction, timestamp_transaction) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "signature_transaction, sig_message, message_transaction, timestamp_transaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (str(transaction_data['from']), str(transaction_data['from_address']), str(transaction_data['to_address']),
-                     str(transaction_data['amount']), str(transaction_data['signature']), str(transaction_data['message']),
-                     str(time.time()),))
+                     str(transaction_data['amount']), str(transaction_data['signature']), str(transaction_data['sig_message']),
+                     str(transaction_data['message']), str(transaction_data['datetime']),))
         conn.commit()
         conn.close()
         return 1
-   # except:
-        #conn.close()
-        #return -1
+    except:
+        conn.close()
+        return -1
 
 def add_new_work_user(user_iden, miner_name, miner_type, complexity):
     conn = sqlite3.connect(database_file)
