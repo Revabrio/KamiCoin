@@ -197,16 +197,17 @@ def validate_transactions(transactions):
                 print('network is trying to pay off more coins than it is normally set up\n')
                 flawed = True
             network_checked = True
-        elif transaction['from'] == 'reward_center':
-            if validate_signature(transaction['from_address'], transaction['signature'], transaction['sig_message']) == True:
-                valid_transactions.append(transaction)
-                print(f'Transaction from {transaction["from"]} for {transaction["amount"]} was successfull')
-        elif transaction['from_address'] != 'network':
-            if validate_signature(transaction['from_address'], transaction['signature'], transaction['sig_message']) == True:
-                wallet_balance = get_wallet_balance(transaction['from'])
-                if float(wallet_balance) >= float(transaction['amount']):
+        elif transaction['from_address'][:2] == 'KC' and transaction['to_address'][:2] == "KC":
+            if transaction['from'] == 'reward_center':
+                if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
                     valid_transactions.append(transaction)
-                    print(f'Transaction from {transaction["from_address"]} for {transaction["amount"]} was successfull')
+                    print(f'Transaction from {transaction["from"]} for {transaction["amount"]} was successfull')
+            elif transaction['from_address'] != 'network':
+                if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
+                    wallet_balance = get_wallet_balance(transaction['from_address'])
+                    if float(wallet_balance) >= float(transaction['amount']):
+                        valid_transactions.append(transaction)
+                        print(f'Transaction from {transaction["from_address"]} for {transaction["amount"]} was successfull')
     if flawed == True:
         return []
     else:

@@ -180,8 +180,8 @@ def transaction():
             # Then we add the transaction to our list
             if len(new_txion['sig_message'])<=128:
                 if functions.validate_signature(new_txion['from_address'],new_txion['signature'],new_txion['sig_message']):
-                    if functions.check_signature_data(new_txion['sig_message'], new_txion['datetime'], new_txion['from_address'], new_txion['to_address'],
-                                            new_txion['amount'], new_txion['message']) == True:
+                    if functions.check_signature_data(new_txion['sig_message'], new_txion['datetime'], new_txion['from_address'][2:],
+                                        new_txion['to_address'][2:], new_txion['amount'], new_txion['message']) == True:
                         new_txion['amount'] = functions.toFixed(float(new_txion['amount']), 10)
                         if float(new_txion['amount']) > 0.0000000001:
                             new_txion['from'] = ''
