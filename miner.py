@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 import json
 import time
+import logs
 import random
 import hashlib
-import logging
-import eventlet
 import database
 import functions
 import miner_config
 from flask import Flask
-import hashlib as hasher
 from flask import request
 from multiprocessing import Process, Pipe
-
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
 
 node = Flask(__name__)
 
@@ -41,6 +36,7 @@ def getWork():
                 salt = database.get_last_block()[5]
                 hash_work = hashlib.sha256((str(num)+salt).encode('utf-8')).hexdigest()
                 database.update_work_user_data(user_iden, miner_name, time_start=int(time.time()), num=num, salt=salt, hash=hash_work)
+                logs.print_log(level=1, message=f'New work for {user_iden[:8]} {miner_name} - {num}')
                 if database.get_work_user_data(user_iden, miner_name)[7] == -1:
                     pass
                 return json.dumps({"salt": salt, "hash": hash_work, "max": num_max})
@@ -72,6 +68,7 @@ def checkWork():
                             database.update_work_user_data(user_iden, miner_name, num=-1,
                                                            success_works=int(database.get_work_user_data(user_iden, miner_name)[2])+1,
                                                            complexity=new_complexity, hashrate=hashrate)
+                            logs.print_log(level=1, message=f'Worker {user_iden[:8]} {miner_name} successfully done his work')
                             functions.add_balance(user_iden, functions.get_complexity_reward(old_complexity))
                             return json.dumps({"success": 1})
                         else:
@@ -104,34 +101,35 @@ def getMiner():
                     'minerName': miner[8],
                     'minerType': miner[9]
                 })
-            return_miners = {'userIdentificator': {'miners': {temp}}}
+            return_miners = {'userIdentificator': {'miners': temp}}
+            return json.dumps(return_miners)
         except:
-            pass
+            return json.dumps({"error": 1})
 
-@node.route('/blocks', methods=['GET','POST'])
-def get_blocks():
-    # Load current blockchain. Only you, should update your blockchain
-    if request.args.get("update") == 'internal_syncing' or (str(request.args.get("update")))[:7] == 'syncing':
-        global BLOCKCHAIN
-        global received_blockchain
-        with eventlet.Timeout(5, False):
-            data = b.recv()
-            eventlet.sleep(0)
-        if data is not None:
-            if data[0] == 'chunk':
-                if data[2] == 0:
-                    received_blockchain = []
-                received_blockchain.append(data[1])
-                b.send(data[2])
-            elif data[0] == 'digest':
-                sha = hasher.sha256()
-                sha.update( str(json.dumps(received_blockchain)).encode('utf-8') )
-                digest = str(sha.hexdigest())
-                if digest == data[1]:
-                    BLOCKCHAIN = received_blockchain
-                else:
-                    print('Received blockchain is corrupted.')
-    return json.dumps({"error": "Unknown parameters"})
+# @node.route('/blocks', methods=['GET','POST'])
+# def get_blocks():
+#     # Load current blockchain. Only you, should update your blockchain
+#     if request.args.get("update") == 'internal_syncing' or (str(request.args.get("update")))[:7] == 'syncing':
+#         global BLOCKCHAIN
+#         global received_blockchain
+#         with eventlet.Timeout(5, False):
+#             #data = b.recv()
+#             eventlet.sleep(0)
+#         if data is not None:
+#             if data[0] == 'chunk':
+#                 if data[2] == 0:
+#                     received_blockchain = []
+#                 received_blockchain.append(data[1])
+#                 #b.send(data[2])
+#             elif data[0] == 'digest':
+#                 sha = hasher.sha256()
+#                 sha.update( str(json.dumps(received_blockchain)).encode('utf-8') )
+#                 digest = str(sha.hexdigest())
+#                 if digest == data[1]:
+#                     BLOCKCHAIN = received_blockchain
+#                 else:
+#                     print('Received blockchain is corrupted.')
+#     return json.dumps({"error": "Unknown parameters"})
 
 @node.route('/block_num', methods=['GET'])
 def get_num_blocks():
@@ -205,22 +203,7 @@ def transaction():
                 return "Transaction submission failed. Message too long\n"
 
         elif new_txion['source'] == "wallet" and new_txion['option'] == "balance":
-            print(new_txion['wallet'])
             return str(functions.toFixed(functions.get_wallet_balance(new_txion['wallet']), 10))
-             # f = open('ledger.txt')
-             # filedata = []
-             # for line in f:
-             #     if line != '\n':
-             #         filedata.append(line)
-             # f.close()
-             # wallet_found = False
-             # for line in filedata:
-             #     data = line.split(':')
-             #     if data[0] == new_txion['wallet']:
-             #         wallet_found = True
-             #         return data[1]
-             # if wallet_found == False:
-             #     return "0"
 
 
         #Send pending transactions to the mining process
@@ -234,12 +217,12 @@ def transaction():
             return 'Arguments not specified'
 
 def welcome_msg():
-    print("""=========================================\n
-        KamiCoin v0.1.1 - BLOCKCHAIN SYSTEM\n
-        =========================================\n\n
-        You can find more help at: https://github.com/Revabrio/KamiCoin\n
-        You can find more help for wallet at: https://github.com/Revabrio/KamiCoin_Wallet\n
-        \n\n\n""")
+    print("""=========================================
+KamiCoin v0.1.1 - BLOCKCHAIN SYSTEM
+=========================================
+You can find more help at: https://github.com/Revabrio/KamiCoin
+You can find more help for wallet at: https://github.com/Revabrio/KamiCoin_Wallet
+""")
     print('Miner has been started at '+miner_config.MINER_NODE_URL+'! Good luck!\n')
 
 if __name__ == '__main__':
@@ -250,14 +233,17 @@ if __name__ == '__main__':
     if answer == True:
         answer_consensus = functions.consensus()
         if answer_consensus == True:
-            print('Blockchain successfully initialized')
+            logs.print_log(level=1, message='Blockchain successfully initialized')
+            # print('Blockchain successfully initialized')
         else:
-            print('Blockchain has been initialized with an external chain')
+            logs.print_log(level=1, message='Blockchain has been initialized with an external chain')
+            # print('Blockchain has been initialized with an external chain')
     else:
-        print('Blockchain is empty, another chains dont exist, creating new chain')
+        logs.print_log(level=1, message='Blockchain is empty, another chains dont exist, creating new chain')
+        # print('Blockchain is empty, another chains dont exist, creating new chain')
         database.add_block(functions.create_genesis_block())
 
-    p1 = Process(target=functions.mine, args=(a,))
+    p1 = Process(target=functions.mine)
     p1.start()
 
     # #Start server to recieve transactions

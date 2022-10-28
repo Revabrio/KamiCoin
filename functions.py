@@ -1,5 +1,6 @@
 import json
 import time
+import logs
 import ecdsa
 import base64
 import random
@@ -64,7 +65,7 @@ def consensus():
     # If the longest chain wasn't ours, then we set our chain to the longest
     if longest_chain == BLOCKCHAIN:
         # Keep searching for proof
-        return False
+        return True
 
     # validated = validate_blockchain(longest_chain, blockchain)
     # print('VALIDATED: '+str(validated))
@@ -114,6 +115,17 @@ def validate_blockchain(alien_chain, my_chain):
         index += 1
 
     return True
+
+def validate_block(block):
+    if int(block[0]) - int(database.get_last_block()[0]) == 1:
+        sha = hasher.sha256()
+        sha.update((str(database.get_last_block()[5]) + str(block[4])).encode('utf-8'))
+        digest = str(sha.hexdigest())
+        if digest[:len(database.get_config_data(target=1))] == database.get_config_data(target=1):
+            block_transactions = json.loads(block[2])['transactions']
+            if len(validate_transactions(block_transactions)) == block_transactions:
+                return True
+    return False
 
 def get_wallet_balance(wallet_address):
     balance = 0.0
@@ -186,7 +198,6 @@ def initialize_miner():
         return False
 
 def validate_transactions(transactions):
-
     flawed = False
     network_checked = False
     valid_transactions = []
@@ -197,17 +208,18 @@ def validate_transactions(transactions):
                 print('network is trying to pay off more coins than it is normally set up\n')
                 flawed = True
             network_checked = True
-        elif transaction['from_address'][:2] == 'KC' and transaction['to_address'][:2] == "KC":
-            if transaction['from'] == 'reward_center':
-                if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
-                    valid_transactions.append(transaction)
-                    print(f'Transaction from {transaction["from"]} for {transaction["amount"]} was successfull')
-            elif transaction['from_address'] != 'network':
-                if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
-                    wallet_balance = get_wallet_balance(transaction['from_address'])
-                    if float(wallet_balance) >= float(transaction['amount']):
+        elif transaction['from_address'][:2] == 'KC':
+            if transaction['to_address'][:2] == "KC":
+                if transaction['from'] == 'reward_center':
+                    if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
                         valid_transactions.append(transaction)
-                        print(f'Transaction from {transaction["from_address"]} for {transaction["amount"]} was successfull')
+                        print(f'Transaction from {transaction["from"]} for {transaction["amount"]} was successfull')
+                elif transaction['from_address'] != 'network':
+                    if validate_signature(transaction['from_address'][2:], transaction['signature'], transaction['sig_message']) == True:
+                        wallet_balance = get_wallet_balance(transaction['from_address'])
+                        if float(wallet_balance) >= float(transaction['amount']):
+                            valid_transactions.append(transaction)
+                            print(f'Transaction from {transaction["from_address"]} for {transaction["amount"]} was successfull')
     if flawed == True:
         return []
     else:
@@ -332,7 +344,26 @@ def get_random_float():
     randoms = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
     return randoms[random.randint(0, len(randoms)-1)]
 
-def mine(a):
+def get_new_blocks():
+    while True:
+        PEED_NODES = database.get_config_data(PEER_NODES=1)
+        for node in PEED_NODES:
+            blocks_num = int(json.loads(requests.get(node + "/block_num"))['blocks_num'])
+            if database.get_config_data(new_block=1) == 'True':
+                our_last_block_id = int(database.get_block_another_node(-2)[0])
+            else:
+                our_last_block_id = int(database.get_last_block()[0])
+            num_blocks = blocks_num - our_last_block_id
+            if num_blocks > 0:
+                for i in range(our_last_block_id, num_blocks):
+                    data = {"block": str(i)}
+                    req = requests.get(node + '/block_get', json=data)
+                    block = json.loads(req.text)
+                    block['data'] = json.loads(block['data'])
+                    database.add_block_another_node(block)
+                    database.update_config_data(new_block='True')
+
+def mine():
     while True:
         """Mining is the only way that new coins can be created.
         In order to prevent too many coins to be created, the process
@@ -346,7 +377,7 @@ def mine(a):
         except Exception:
             last_proof = 0
 
-        print('starting a new search round\n')
+        logs.print_log(level=1, message='Starting a new search round')
         # Find the proof of work for the current block being mined
         # Note: The program will hang here until a new proof of work is found
         proof = proof_of_work(last_proof)
@@ -449,12 +480,23 @@ def mine(a):
             check_stats()
             #BLOCKCHAIN.append(block_to_add)
             # Let the client know this node mined a block
-            print(json.dumps({
-              'index': new_block_index,
-              'timestamp': str(new_block_timestamp),
-              'data': new_block_data,
-              'hash': last_block_hash
-            }) + "\n")
+            logs.print_log(level=1, message=f'New block has been mined id - {block_to_add["index"]}, number transactions - {len(block_to_add["data"]["transactions"])}')
+        else:
+            block_founded = database.get_block_another_node(-1)
+            if validate_block(block_founded) == True:
+                block_to_add = {
+                    'index': str(block_founded[0]),
+                    'timestamp': str(block_founded[1]),
+                     'data': block_founded[2],
+                    'hash': block_founded[3],
+                    'previous_hash': block_founded[4],
+                    "prover": block_founded[5]
+                }
+                database.add_block(block_to_add)
+                logs.print_log(level=1, message='Another node get block')
+            if database.get_block_another_node(-1)[0] == 0:
+                database.update_config_data(new_block='False')
+            database.del_pending_block(block_founded[0])
 
             # with eventlet.Timeout(5,False):
             #     i = 0
@@ -492,25 +534,27 @@ def proof_of_work(last_proof):
   # and the proof of work of the previous block in the chain
   #while not (incrementor % 7919 == 0 and incrementor % last_proof == 0):
   while not found:
-      incrementor += 1
-      i += 1
-      sha = hasher.sha256()
-      sha.update((str(database.get_last_block()[5]) + str(incrementor)).encode('utf-8'))
-      digest = str(sha.hexdigest())
+      if database.get_config_data(new_block=1) != 'True':
+          incrementor += 1
+          i += 1
+          sha = hasher.sha256()
+          sha.update((str(database.get_last_block()[5]) + str(incrementor)).encode('utf-8'))
+          digest = str(sha.hexdigest())
 
-      if (timefound != int((time.time()-start_time))):
-          timefound = int((time.time()-start_time))
-          time_printed = False
+          if (timefound != int((time.time()-start_time))):
+              timefound = int((time.time()-start_time))
+              time_printed = False
 
-      if (time_printed == False and timefound != 0 and timefound % 60 == 0):
-          print('speed - '+str(int(i/timefound)/1000)+' KH\s' + ', blockchain\'s length is ' + str(int(database.get_last_block()[0])+1) +'\n')
-          time_printed = True
+          if (time_printed == False and timefound != 0 and timefound % 60 == 0):
+              logs.print_log(level=1, message=f'speed - '+str(int(i/timefound)/1000)+' KH\s')
+              time_printed = True
 
-      if (digest[:len(database.get_config_data(target=1))] == database.get_config_data(target=1)):
-          found = True
-          print("")
-          print(digest + ' - ' +str(i) +' FOUND!!!')
-          timefound = int((time.time()-start_time))
+          if (digest[:len(database.get_config_data(target=1))] == database.get_config_data(target=1)):
+              found = True
+              logs.print_log(level=1, message=f'Found new block - {digest[:8]} incrementor - {str(i)}')
+              timefound = int((time.time()-start_time))
+      else:
+          incrementor = False
 
       # # Check if any node found the solution every 60 seconds
       # if (int(i%200000)==0):

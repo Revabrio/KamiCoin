@@ -17,6 +17,20 @@ def add_block(block_data):
         conn.close()
         return -1
 
+def add_block_another_node(block_data):
+    conn = sqlite3.connect(database_file)
+    try:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO blocks_wait (id, timestamp, data, previous_hash, prover, hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    (block_data['index'], block_data['timestamp'], json.dumps(block_data['data']),
+                     block_data['previous_hash'], block_data['prover'], block_data['hash']))
+        conn.commit()
+        conn.close()
+        return 1
+    except:
+        conn.close()
+        return -1
+
 def add_pending_transaction(transaction_data):
     conn = sqlite3.connect(database_file)
     try:
@@ -49,7 +63,7 @@ def add_new_work_user(user_iden, miner_name, miner_type, complexity):
 
 def get_config_data(PEER_NODES = -1, expected_sharetime = -1, complexity = -1, max_coins = -1,
                     REWARD_CENTER_NODE_PRIVATE_KEY = -1, REWARD_CENTER_NODE_PUBLIC_KEY = -1, start_hour = -1,
-                    target = -1):
+                    target = -1, new_block = -1):
     conn = sqlite3.connect(database_file)
     try:
         cur = conn.cursor()
@@ -76,6 +90,9 @@ def get_config_data(PEER_NODES = -1, expected_sharetime = -1, complexity = -1, m
             row = cur.fetchone()
         if target != -1:
             cur.execute("SELECT data FROM config WHERE name = ?", ('target',))
+            row = cur.fetchone()
+        if new_block != -1:
+            cur.execute("SELECT data FROM config WHERE name = ?", ('new_block',))
             row = cur.fetchone()
         try:
             if row:
@@ -114,6 +131,54 @@ def get_block(block_id=-1, block_hash=-1):
             row = cur.fetchone()
             if row:
                 if row[5] == block_hash:
+                    conn.close()
+                    return 1, row
+            else:
+                conn.close()
+                return 0, 0
+        except:
+            conn.close()
+            return -1
+
+def get_block_another_node(block_id=-3):
+    conn = sqlite3.connect(database_file)
+    if block_id > 0:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM blocks_wait WHERE id = ?", (block_id,))
+            row = cur.fetchone()
+            if row:
+                if row[0] == block_id:
+                    conn.close()
+                    return 1, row
+            else:
+                conn.close()
+                return 0, 0
+        except:
+            conn.close()
+            return -1
+    elif block_id == -1:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM blocks_wait", (block_id,))
+            row = cur.fetchone()
+            if row:
+                if row[0] == block_id:
+                    conn.close()
+                    return 1, row
+            else:
+                conn.close()
+                return 0, 0
+        except:
+            conn.close()
+            return -1
+    elif block_id == -2:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM blocks_wait ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                if row[0] == block_id:
                     conn.close()
                     return 1, row
             else:
@@ -250,7 +315,7 @@ def update_work_user_data(user_iden, miner_name, level=-2, success_works=-2, tim
 
 def update_config_data(PEER_NODES = -1, expected_sharetime = -1, complexity = -1, max_coins = -1,
                     REWARD_CENTER_NODE_PRIVATE_KEY = -1, REWARD_CENTER_NODE_PUBLIC_KEY = -1, start_hour = -1,
-                    target = -1):
+                    target = -1, new_block = -1):
     conn = sqlite3.connect(database_file)
     try:
         cur = conn.cursor()
@@ -270,6 +335,8 @@ def update_config_data(PEER_NODES = -1, expected_sharetime = -1, complexity = -1
             cur.execute("UPDATE config SET data = ? WHERE name = ?", (str(start_hour), 'start_hour',))
         if target != -1:
             cur.execute("UPDATE config SET data = ? WHERE name = ?", (str(target), 'target',))
+        if new_block != -1:
+            cur.execute("UPDATE config SET data = ? WHERE name = ?", (str(new_block), 'new_block',))
         conn.commit()
         conn.close()
         return 1
@@ -282,6 +349,18 @@ def update_stats_coin(new_stat):
     try:
         cur = conn.cursor()
         cur.execute("UPDATE stats SET data = ? WHERE name = 'new_coins'", (str(new_stat),))
+        conn.commit()
+        conn.close()
+        return 1
+    except:
+        conn.close()
+        return -1
+
+def del_pending_block(block_id):
+    conn = sqlite3.connect(database_file)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM blocks_wait WHERE id = ?", (block_id,))
         conn.commit()
         conn.close()
         return 1
